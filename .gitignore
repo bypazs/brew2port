@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+._*
+
+# Swift / PortCat build output
+PortCat/.build/
+PortCat/build/
+PortCat/.swiftpm/
+*.xcodeproj/xcuserdata/
+DerivedData/
+
+# brew2port run output (backups, logs) if run from inside the repo
+brew2port-*/
+
+# Your personal name overrides (the example file is committed)
+port-map.txt
+
+# Editors
+.vscode/
+.idea/
+*.swp

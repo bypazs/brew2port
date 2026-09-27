@@ -1,0 +1,10 @@
+# brew2port name overrides
+# Copy to port-map.txt, edit, then run: ./brew2port.sh --map port-map.txt
+#
+# Format: <homebrew-name> <macports-name>
+# Use "-" as the MacPorts name to skip a formula (keep it in Homebrew).
+# Find port names with: port search <name>
+
+# awscli          py313-awscli2
+# postgresql@16   postgresql16-server
+# nvm             -
