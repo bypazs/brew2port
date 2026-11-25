@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 BUNDLE_ID="io.github.brew2port.portcat"
 INSTALL=0
 ARCH_ARGS=()

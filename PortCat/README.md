@@ -25,11 +25,12 @@ It also helps you get off Homebrew:
 | **Remove old copies…** | Removes each Homebrew formula once its MacPorts version is installed, then clears unneeded dependencies |
 | **Keep in Homebrew** | For tools with no MacPorts port (e.g. `supabase`): stop reminding me. **Undo** brings them back |
 | **Clean up Homebrew** | Appears when Homebrew has leftover dependencies nothing uses; runs `brew autoremove` and `brew cleanup` (no password) |
+| **Update** (Codex) | Appears when a newer Codex CLI is out. Runs the official installer (`curl -fsSL https://chatgpt.com/codex/install.sh \| sh`): in the background if Codex came from that installer, otherwise in Terminal so it can replace a Homebrew/npm copy |
 | **Clean up** | The MacPorts side: `port reclaim` removes old versions, unused downloads and unneeded dependencies |
 
 Homebrew itself is never uninstalled, since it can't be reinstalled on Intel Macs.
 
-It checks for outdated ports on its own every 3 hours and whenever you open it. Those checks don't need a password. Anything that changes your system (syncing the package list, upgrading, cleaning up) shows the standard macOS password dialog each time, and nothing runs as root in the background.
+It checks for outdated ports (and a newer Codex, if you have it) on its own every 3 hours and whenever you open it. When something new turns up it sends a macOS notification with an **Update now** / **Upgrade all** button, once per new version. macOS asks the first time whether PortCat may send notifications; you can change that later in System Settings → Notifications. Those checks don't need a password. Anything that changes your system (syncing the package list, upgrading, cleaning up) shows the standard macOS password dialog each time, and nothing runs as root in the background.
 
 ## Build and install
 

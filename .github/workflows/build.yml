@@ -1,0 +1,16 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check brew2port.sh syntax
+        run: bash -n brew2port.sh
+      - name: Build PortCat
+        working-directory: PortCat
+        run: swift build -c release

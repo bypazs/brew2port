@@ -31,6 +31,8 @@ struct PopoverView: View {
                 ProgressView().progressViewStyle(.linear)
             }
 
+            codexSection
+
             if !manager.isInstalled {
                 notInstalled
             } else {
@@ -74,7 +76,7 @@ struct PopoverView: View {
         case .running:  return manager.busyMessage ?? "Working…"
         case .happy:    return "All done!"
         case .sad:      return manager.isInstalled ? "Something needs a look" : "MacPorts not found"
-        case .waving:   return "\(manager.outdated.count) update\(manager.outdated.count == 1 ? "" : "s") available"
+        case .waving:   return "\(manager.updateCount) update\(manager.updateCount == 1 ? "" : "s") available"
         case .sleeping: return "All up to date"
         }
     }
@@ -84,12 +86,39 @@ struct PopoverView: View {
         case .running:  return "Hang on, I'm on it! ε=ε=(ﾉ≧∀≦)ﾉ"
         case .happy:    return "Otsukaresama~ (๑•̀ㅂ•́)و✧"
         case .sad:      return manager.isInstalled ? "See below (´・ω・`)" : "I need MacPorts to work (´；ω；`)"
-        case .waving:   return "Psst! Some ports want upgrading"
+        case .waving:   return "Psst! Some updates are waiting"
         case .sleeping: return "Nothing to do… zzz (－ω－)"
         }
     }
 
     // MARK: Sections
+
+    @ViewBuilder
+    private var codexSection: some View {
+        if let codex = manager.codex, codex.updateAvailable, let latest = codex.latest {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Codex").font(.callout.weight(.medium))
+                        Text("\(codex.current) → \(latest)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(codex.standalone ? "Update" : "Update…") { Task { await manager.updateCodex() } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(manager.isBusy)
+                        .help(Codex.installCommand)
+                }
+                Text(codex.standalone
+                     ? "Uses the official Codex installer. No password needed."
+                     : "Opens Terminal and runs the official Codex installer. If it asks about your Homebrew or npm copy, removing it makes future updates one click.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
     private var notInstalled: some View {
         VStack(alignment: .leading, spacing: 8) {

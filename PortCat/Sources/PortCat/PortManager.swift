@@ -39,6 +39,14 @@ final class PortManager: NSObject, ObservableObject {
     /// Set after sending the user to Terminal; the next refresh clears the notice.
     private var clearNoticeOnRefresh = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// The Codex CLI, if installed (nil = not found).
+    @Published private(set) var codex: CodexStatus? = nil { didSet { if oldValue != codex { onChange?() } } }
+    private var codexLatest: (version: String, fetched: Date)?
+    private static let notifiedCodexKey = "notifiedCodexVersion"
+    private static let notifiedPortsKey = "notifiedPorts"
+
+    /// Posts macOS notifications; set by the app delegate.
+    var notifier: Notifier?
 
     /// Called whenever something that affects the cat changes.
     var onChange: (@MainActor () -> Void)?
@@ -52,11 +60,14 @@ final class PortManager: NSObject, ObservableObject {
     var isInstalled: Bool { FileManager.default.isExecutableFile(atPath: Self.portPath) }
     var isBusy: Bool { busyMessage != nil }
 
+    /// Outdated ports plus Codex, if it has an update.
+    var updateCount: Int { outdated.count + (codex?.updateAvailable == true ? 1 : 0) }
+
     var mood: CatMood {
         if isBusy { return .running }
         if celebrating { return .happy }
         if !isInstalled || problem != nil { return .sad }
-        if !outdated.isEmpty { return .waving }
+        if updateCount > 0 { return .waving }
         return .sleeping
     }
 
@@ -87,6 +98,7 @@ final class PortManager: NSObject, ObservableObject {
         guard !isBusy else { return }
         if clearNoticeOnRefresh { notice = nil; clearNoticeOnRefresh = false }
         await countHomebrewFormulae()
+        await checkCodex()
         guard isInstalled else {
             problem = nil
             outdated = []
@@ -107,6 +119,92 @@ final class PortManager: NSObject, ObservableObject {
         lastChecked = Date()
         busyMessage = nil
         if !o.succeeded { appendLog("port outdated", o.output) }
+        notifyPortsIfNeeded()
+    }
+
+    // MARK: - Codex (updates through its own installer)
+
+    private func checkCodex() async {
+        guard let path = Codex.locate() else { codex = nil; return }
+        let result = await Shell.run(path, ["--version"])
+        guard result.succeeded, let current = Codex.parseVersion(result.output) else { codex = nil; return }
+        // Ask the network at most once an hour.
+        if codexLatest == nil || Date().timeIntervalSince(codexLatest!.fetched) > 60 * 60,
+           let fresh = await Codex.latestVersion() {
+            codexLatest = (fresh, Date())
+        }
+        codex = CodexStatus(path: path, current: current, latest: codexLatest?.version,
+                            standalone: path == Codex.standalonePath)
+        notifyCodexIfNeeded()
+    }
+
+    /// Official-installer copies update in the background (no password).
+    /// Homebrew/npm copies open Terminal, so the installer can offer to
+    /// replace them; after that, updates are one click.
+    func updateCodex() async {
+        guard let current = codex, !isBusy else { return }
+        guard current.standalone else { openCodexInstaller(); return }
+
+        busyMessage = "Updating Codex…"
+        notice = nil
+        let env = ["CODEX_NON_INTERACTIVE": "1",
+                   "PATH": Codex.home + "/.local/bin:" + Shell.searchPath]
+        let result = await Shell.run("/bin/bash", ["-c", "set -o pipefail; " + Codex.installCommand], extraEnv: env)
+        busyMessage = nil
+        appendLog(Codex.installCommand, result.output)
+        await checkCodex()
+        if result.succeeded, let now = codex, !now.updateAvailable {
+            problem = nil
+            notice = "Codex is updated to \(now.current)."
+            celebrate()
+        } else {
+            let tail = result.output.split(separator: "\n").suffix(6).joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            problem = "Codex didn't update. \(tail)\nYou can also run it in Terminal:\n\(Codex.installCommand)"
+        }
+    }
+
+    private func openCodexInstaller() {
+        let body = """
+        #!/bin/bash
+        clear
+        echo "Updating Codex with the official installer…"
+        echo
+        \(Codex.installCommand)
+        echo
+        read -r -p "Done. Press Enter to close this window… " _
+        """
+        do {
+            try runInTerminal("codex-update.command", body)
+            clearNoticeOnRefresh = true
+            notice = "Codex is updating in Terminal. When it's done, click me again to refresh."
+        } catch {
+            problem = "Couldn't open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    private func notifyCodexIfNeeded() {
+        guard let status = codex, status.updateAvailable, let latest = status.latest,
+              UserDefaults.standard.string(forKey: Self.notifiedCodexKey) != latest else { return }
+        UserDefaults.standard.set(latest, forKey: Self.notifiedCodexKey)
+        notifier?.post(id: "codex-\(latest)",
+                       title: "Codex \(latest) is available",
+                       body: "You have \(status.current). Press Update now to install it.",
+                       category: NotifyID.codexCategory)
+    }
+
+    /// Notifies once per new version, not on every check.
+    private func notifyPortsIfNeeded() {
+        guard !outdated.isEmpty else { return }
+        let current = Set(outdated.map { "\($0.name)@\($0.latest)" })
+        let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedPortsKey) ?? [])
+        guard !current.isSubset(of: seen) else { return }
+        UserDefaults.standard.set(Array(current), forKey: Self.notifiedPortsKey)
+        let names = outdated.prefix(4).map(\.name).joined(separator: ", ") + (outdated.count > 4 ? "…" : "")
+        notifier?.post(id: "ports",
+                       title: "\(outdated.count) MacPorts update\(outdated.count == 1 ? "" : "s") available",
+                       body: names,
+                       category: NotifyID.portsCategory)
     }
 
     private func countHomebrewFormulae() async {
@@ -356,9 +454,6 @@ final class PortManager: NSObject, ObservableObject {
             return
         }
         do {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("PortCat", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let command = folder.appendingPathComponent("brew2port.command")
             let body = """
             #!/bin/bash
             clear
@@ -367,9 +462,7 @@ final class PortManager: NSObject, ObservableObject {
             echo
             read -r -p "All done. Press Enter to close this window… " _
             """
-            try body.write(to: command, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
-            NSWorkspace.shared.open(command)
+            try runInTerminal("brew2port.command", body)
             clearNoticeOnRefresh = true
             notice = removeHomebrewCopies
                 ? "Removing old Homebrew copies in Terminal. When it's done, click me again to refresh."
@@ -377,6 +470,16 @@ final class PortManager: NSObject, ObservableObject {
         } catch {
             problem = "Couldn't start brew2port: \(error.localizedDescription)"
         }
+    }
+
+    /// Writes a .command script to a temp folder and opens it in Terminal.
+    private func runInTerminal(_ name: String, _ body: String) throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("PortCat", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let command = folder.appendingPathComponent(name)
+        try body.write(to: command, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
+        NSWorkspace.shared.open(command)
     }
 
     // MARK: - Misc
