@@ -26,6 +26,7 @@ It also helps you get off Homebrew:
 | **Keep in Homebrew** | For tools with no MacPorts port (e.g. `supabase`): stop reminding me. **Undo** brings them back |
 | **Clean up Homebrew** | Appears when Homebrew has leftover dependencies nothing uses; runs `brew autoremove` and `brew cleanup` (no password) |
 | **Update** (Codex) | Appears when a newer Codex CLI is out. Runs the official installer (`curl -fsSL https://chatgpt.com/codex/install.sh \| sh`): in the background if Codex came from that installer, otherwise in Terminal so it can replace a Homebrew/npm copy |
+| **Update** (Other apps) | Lists outdated Homebrew formulae and apps, npm global packages and App Store apps (needs [`mas`](https://github.com/mas-cli/mas)). Homebrew apps update in Terminal because their installers can ask for a password; the rest update in the background. **Update all** does everything in one go |
 | **Clean up** | The MacPorts side: `port reclaim` removes old versions, unused downloads and unneeded dependencies |
 
 Homebrew itself is never uninstalled, since it can't be reinstalled on Intel Macs.

@@ -32,6 +32,7 @@ struct PopoverView: View {
             }
 
             codexSection
+            extrasSection
 
             if !manager.isInstalled {
                 notInstalled
@@ -92,6 +93,45 @@ struct PopoverView: View {
     }
 
     // MARK: Sections
+
+    @ViewBuilder
+    private var extrasSection: some View {
+        if !manager.extras.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Other apps").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if manager.extras.count > 1 {
+                        Button("Update all") { Task { await manager.updateAllExtras() } }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(manager.isBusy)
+                    }
+                }
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(manager.extras) { item in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.title).font(.callout.weight(.medium))
+                                    Text("\(item.source.rawValue) · \(item.current) → \(item.latest)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(item.needsTerminal ? "Update…" : "Update") {
+                                    Task { await manager.updateExtra(item) }
+                                }
+                                .controlSize(.small)
+                                .disabled(manager.isBusy)
+                                .help(item.needsTerminal ? "Opens Terminal, since the installer may ask for your password" : "Updates in the background")
+                            }
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(manager.extras.count) * 36, 150))
+            }
+        }
+    }
 
     @ViewBuilder
     private var codexSection: some View {

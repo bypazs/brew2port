@@ -5,6 +5,7 @@ enum NotifyID {
     static let updateAction = "UPDATE_NOW"
     static let codexCategory = "CODEX_UPDATE"
     static let portsCategory = "PORTS_UPDATE"
+    static let extrasCategory = "EXTRAS_UPDATE"
 }
 
 /// macOS notifications with an update button. macOS asks the user once
@@ -31,7 +32,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             identifier: NotifyID.portsCategory,
             actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: "Upgrade all", options: [])],
             intentIdentifiers: [])
-        center.setNotificationCategories([codex, ports])
+        let extras = UNNotificationCategory(
+            identifier: NotifyID.extrasCategory,
+            actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: "Update now", options: [])],
+            intentIdentifiers: [])
+        center.setNotificationCategories([codex, ports, extras])
     }
 
     func post(id: String, title: String, body: String, category: String) {

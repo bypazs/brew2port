@@ -3,7 +3,8 @@
 ## PortCat 0.4.0
 - Codex updates: PortCat checks the installed Codex CLI against the latest release (OpenAI's release channel, then GitHub) and shows an **Update** button. Copies from the official installer (`~/.local/bin/codex`) update in the background with no password. Homebrew/npm copies open Terminal so the installer can offer to replace them.
 - macOS notifications with a button: "Update now" for Codex, "Upgrade all" for MacPorts ports. Each new version is announced once, not on every check.
-- The cat waves and the badge counts Codex updates too.
+- Other apps: PortCat also lists outdated **Homebrew** formulae and apps, **npm** global packages and **App Store** apps (needs `mas`), each with an Update button and an "Update all". Homebrew apps update in Terminal because their installers can ask for a password; the rest update in the background.
+- The cat waves and the badge counts all of these.
 
 ## brew2port 0.5.1
 - Codex (formula or cask) is now marked "own installer" instead of "no match", and the official `curl -fsSL https://chatgpt.com/codex/install.sh | sh` command is shown. `--checkup` prints the same tip when `codex` is installed. The script never runs it.

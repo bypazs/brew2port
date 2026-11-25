@@ -46,8 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.onUpdate = { [weak self] category in
             guard let manager = self?.manager else { return }
             Task {
-                if category == NotifyID.codexCategory { await manager.updateCodex() }
-                else { await manager.upgradeAll() }
+                switch category {
+                case NotifyID.codexCategory:  await manager.updateCodex()
+                case NotifyID.extrasCategory: await manager.updateAllExtras()
+                default:                      await manager.upgradeAll()
+                }
             }
         }
         notifier.onOpen = { [weak self] in self?.showPopover() }

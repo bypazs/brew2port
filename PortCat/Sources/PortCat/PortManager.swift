@@ -42,6 +42,10 @@ final class PortManager: NSObject, ObservableObject {
     /// The Codex CLI, if installed (nil = not found).
     @Published private(set) var codex: CodexStatus? = nil { didSet { if oldValue != codex { onChange?() } } }
     private var codexLatest: (version: String, fetched: Date)?
+    /// Updates from Homebrew, npm and the App Store.
+    @Published private(set) var extras: [ExtraUpdate] = [] { didSet { if oldValue != extras { onChange?() } } }
+    private var lastBrewUpdate: Date?
+    private static let notifiedExtrasKey = "notifiedExtras"
     private static let notifiedCodexKey = "notifiedCodexVersion"
     private static let notifiedPortsKey = "notifiedPorts"
 
@@ -61,7 +65,7 @@ final class PortManager: NSObject, ObservableObject {
     var isBusy: Bool { busyMessage != nil }
 
     /// Outdated ports plus Codex, if it has an update.
-    var updateCount: Int { outdated.count + (codex?.updateAvailable == true ? 1 : 0) }
+    var updateCount: Int { outdated.count + extras.count + (codex?.updateAvailable == true ? 1 : 0) }
 
     var mood: CatMood {
         if isBusy { return .running }
@@ -99,6 +103,7 @@ final class PortManager: NSObject, ObservableObject {
         if clearNoticeOnRefresh { notice = nil; clearNoticeOnRefresh = false }
         await countHomebrewFormulae()
         await checkCodex()
+        await checkExtras()
         guard isInstalled else {
             problem = nil
             outdated = []
@@ -120,6 +125,125 @@ final class PortManager: NSObject, ObservableObject {
         busyMessage = nil
         if !o.succeeded { appendLog("port outdated", o.output) }
         notifyPortsIfNeeded()
+    }
+
+    // MARK: - Homebrew, npm and App Store updates
+
+    private func checkExtras() async {
+        var found: [ExtraUpdate] = []
+
+        if let brew = Self.brewPath {
+            // Refresh Homebrew's index now and then, otherwise "outdated" goes stale.
+            if lastBrewUpdate == nil || Date().timeIntervalSince(lastBrewUpdate!) > 6 * 3600 {
+                _ = await Shell.run(brew, ["update", "--quiet"], extraEnv: ["HOMEBREW_NO_ENV_HINTS": "1"])
+                lastBrewUpdate = Date()
+            }
+            let result = await Shell.run(brew, ["outdated", "--json=v2"], extraEnv: Self.brewEnv)
+            if result.succeeded { found += Extras.parseBrew(result.output) }
+        }
+        if let npm = Extras.locate("npm") {
+            // Exit code 1 only means "something is outdated".
+            let result = await Shell.run(npm, ["outdated", "-g", "--json"], extraEnv: Extras.environment(for: npm))
+            found += Extras.parseNpm(result.output)
+        }
+        if let mas = Extras.locate("mas") {
+            let result = await Shell.run(mas, ["outdated"], extraEnv: Extras.environment(for: mas))
+            if result.succeeded { found += Extras.parseMas(result.output) }
+        }
+        extras = found
+        notifyExtrasIfNeeded()
+    }
+
+    /// Runs one upgrade without a shell. Returns nil if the tool or name isn't usable.
+    private func runExtra(_ item: ExtraUpdate) async -> CommandResult? {
+        guard let command = Extras.upgradeCommand(for: item) else { return nil }
+        let result = await Shell.run(command.executable, command.arguments,
+                                     extraEnv: Extras.environment(for: command.executable))
+        appendLog("\(item.source.rawValue): \(item.title)", result.output)
+        return result
+    }
+
+    func updateExtra(_ item: ExtraUpdate) async {
+        guard !isBusy else { return }
+        if item.needsTerminal { openExtrasInTerminal([item]); return }
+        busyMessage = "Updating \(item.title)…"
+        notice = nil
+        let result = await runExtra(item)
+        busyMessage = nil
+        if let result, result.succeeded {
+            problem = nil
+            await refresh()
+            notice = "\(item.title) is updated."
+            celebrate()
+        } else {
+            let tail = result?.output.split(separator: "\n").suffix(6).joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            problem = "\(item.title) didn't update.\n" + (tail.isEmpty ? "Check the log below." : tail)
+            await refresh()
+        }
+    }
+
+    /// Updates everything that doesn't need a password in the background,
+    /// then opens Terminal for Homebrew apps (their installers can ask for one).
+    func updateAllExtras() async {
+        guard !isBusy else { return }
+        let background = extras.filter { !$0.needsTerminal }
+        let casks = extras.filter(\.needsTerminal)
+        var failed: [String] = []
+        notice = nil
+        for (index, item) in background.enumerated() {
+            busyMessage = "Updating \(item.title) (\(index + 1)/\(background.count))…"
+            let result = await runExtra(item)
+            if result?.succeeded != true { failed.append(item.title) }
+        }
+        busyMessage = nil
+        if !casks.isEmpty { openExtrasInTerminal(casks) }
+        if failed.isEmpty {
+            problem = nil
+            if !background.isEmpty { notice = "Updated \(background.count) package\(background.count == 1 ? "" : "s")." }
+            if !background.isEmpty { celebrate() }
+        } else {
+            problem = "These didn't update: \(failed.joined(separator: ", ")). See the log below."
+        }
+        await refresh()
+    }
+
+    private func openExtrasInTerminal(_ items: [ExtraUpdate]) {
+        let lines = items.compactMap { item -> String? in
+            guard let command = Extras.upgradeCommand(for: item) else { return nil }
+            return ([command.executable] + command.arguments).map { "'\($0)'" }.joined(separator: " ")
+        }
+        guard !lines.isEmpty else { problem = "Couldn't build the update command."; return }
+        let body = """
+        #!/bin/bash
+        clear
+        echo "Updating \(items.map(\.title).joined(separator: ", "))…"
+        echo
+        \(lines.joined(separator: "\n"))
+        echo
+        read -r -p "Done. Press Enter to close this window… " _
+        """
+        do {
+            try runInTerminal("extras-update.command", body)
+            clearNoticeOnRefresh = true
+            notice = "Updating in Terminal. When it's done, click me again to refresh."
+        } catch {
+            problem = "Couldn't open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    /// Notifies once per new set of versions, not on every check.
+    private func notifyExtrasIfNeeded() {
+        guard !extras.isEmpty else { return }
+        let current = Set(extras.map { "\($0.id)@\($0.latest)" })
+        let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedExtrasKey) ?? [])
+        guard !current.isSubset(of: seen) else { return }
+        UserDefaults.standard.set(Array(current), forKey: Self.notifiedExtrasKey)
+        let names = extras.prefix(4).map(\.title).joined(separator: ", ") + (extras.count > 4 ? "…" : "")
+        notifier?.post(id: "extras",
+                       title: "\(extras.count) app update\(extras.count == 1 ? "" : "s") available",
+                       body: names,
+                       category: NotifyID.extrasCategory)
     }
 
     // MARK: - Codex (updates through its own installer)
