@@ -397,7 +397,7 @@ struct PopoverView: View {
             }
             Section("Notifications") {
                 if manager.isSnoozed, let until = manager.snoozedUntil {
-                    Button("Resume (paused until \\(until.formatted(date: .abbreviated, time: .shortened)))") {
+                    Button("Resume (paused until \(until.formatted(date: .abbreviated, time: .shortened)))") {
                         manager.resumeAlerts()
                     }
                 } else {
