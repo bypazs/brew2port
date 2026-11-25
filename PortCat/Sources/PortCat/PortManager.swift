@@ -131,10 +131,13 @@ final class PortManager: NSObject, ObservableObject {
     func refresh() async {
         guard !isBusy else { return }
         if clearNoticeOnRefresh { notice = nil; clearNoticeOnRefresh = false }
+        busyMessage = "Checking for updates…"
         await countHomebrewFormulae()
         await checkCodex()
         await checkExtras()
         guard isInstalled else {
+            busyMessage = nil
+            lastChecked = Date()
             problem = nil
             outdated = []
             requested = []
@@ -169,12 +172,17 @@ final class PortManager: NSObject, ObservableObject {
                 lastBrewUpdate = Date()
             }
             let result = await Shell.run(brew, ["outdated", "--json=v2"], extraEnv: Self.brewEnv)
-            if result.succeeded { found += Extras.parseBrew(result.output) }
+            found += Extras.parseBrew(result.output)
         }
         if let npm = Extras.locate("npm"), isEnabled(ExtraSource.npm.rawValue) {
             // Exit code 1 only means "something is outdated".
-            let result = await Shell.run(npm, ["outdated", "-g", "--json"], extraEnv: Extras.environment(for: npm))
-            found += Extras.parseNpm(result.output)
+            let env = Extras.environment(for: npm)
+            let prefix = await Shell.run(npm, ["prefix", "-g"], extraEnv: env).output
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let modules = prefix + "/lib/node_modules"
+            let needsAdmin = !prefix.isEmpty && !FileManager.default.isWritableFile(atPath: modules)
+            let result = await Shell.run(npm, ["outdated", "-g", "--json"], extraEnv: env)
+            found += Extras.parseNpm(result.output, needsAdmin: needsAdmin)
         }
         if let mas = Extras.locate("mas"), isEnabled(ExtraSource.appStore.rawValue) {
             let result = await Shell.run(mas, ["outdated"], extraEnv: Extras.environment(for: mas))
@@ -241,13 +249,14 @@ final class PortManager: NSObject, ObservableObject {
     private func openExtrasInTerminal(_ items: [ExtraUpdate]) {
         let lines = items.compactMap { item -> String? in
             guard let command = Extras.upgradeCommand(for: item) else { return nil }
-            return ([command.executable] + command.arguments).map { "'\($0)'" }.joined(separator: " ")
+            let line = ([command.executable] + command.arguments).map { "'\($0)'" }.joined(separator: " ")
+            return item.needsAdmin ? "sudo " + line : line
         }
         guard !lines.isEmpty else { problem = "Couldn't build the update command."; return }
         let body = """
         #!/bin/bash
         clear
-        echo "Updating \(items.map(\.title).joined(separator: ", "))…"
+        echo "Updating \(items.map(\.name).filter(Extras.isValidName).joined(separator: ", "))…"
         echo
         \(lines.joined(separator: "\n"))
         echo

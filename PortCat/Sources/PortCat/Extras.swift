@@ -17,10 +17,12 @@ struct ExtraUpdate: Identifiable, Hashable {
     let title: String
     let current: String
     let latest: String
+    /// The install folder isn't yours (e.g. MacPorts' npm under /opt/local), so it needs sudo.
+    var needsAdmin = false
     var id: String { source.rawValue + ":" + name }
 
-    /// Cask installers can ask for an admin password, which needs a real Terminal.
-    var needsTerminal: Bool { source == .brewCask }
+    /// Cask installers and sudo can ask for a password, which needs a real Terminal.
+    var needsTerminal: Bool { source == .brewCask || needsAdmin }
 }
 
 /// Finds, parses and builds commands for the extra package managers.
@@ -32,7 +34,7 @@ enum Extras {
     /// Names are passed as arguments (never through a shell), but still refuse
     /// anything that could look like an option or contain odd characters.
     static func isValidName(_ name: String) -> Bool {
-        name.range(of: "^[A-Za-z0-9][A-Za-z0-9@._+/-]*$", options: .regularExpression) != nil
+        name.range(of: "^@?[A-Za-z0-9][A-Za-z0-9@._+/-]*$", options: .regularExpression) != nil
     }
 
     // MARK: - Locating tools
@@ -100,7 +102,7 @@ enum Extras {
 
     /// `npm outdated -g --json`: {"pkg":{"current","wanted","latest","location"}}.
     /// npm exits with 1 when something is outdated, and may print warnings around the JSON.
-    static func parseNpm(_ text: String) -> [ExtraUpdate] {
+    static func parseNpm(_ text: String, needsAdmin: Bool = false) -> [ExtraUpdate] {
         guard let data = jsonSlice(text, open: "{", close: "}"),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
         return root.compactMap { name, value -> ExtraUpdate? in
@@ -109,7 +111,8 @@ enum Extras {
                   let current = info["current"] as? String,
                   let latest = info["latest"] as? String,
                   current != latest else { return nil }
-            return ExtraUpdate(source: .npm, name: name, title: name, current: current, latest: latest)
+            return ExtraUpdate(source: .npm, name: name, title: name, current: current, latest: latest,
+                               needsAdmin: needsAdmin)
         }
         .sorted { $0.name < $1.name }
     }

@@ -2,7 +2,9 @@ name: build
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   build:
@@ -14,3 +16,6 @@ jobs:
       - name: Build PortCat
         working-directory: PortCat
         run: swift build -c release
+      - name: Test PortCat parsers
+        working-directory: PortCat
+        run: swift test

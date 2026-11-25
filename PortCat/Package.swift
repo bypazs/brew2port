@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "PortCat",
             path: "Sources/PortCat"
+        ),
+        .testTarget(
+            name: "PortCatTests",
+            dependencies: ["PortCat"],
+            path: "Tests/PortCatTests"
         )
     ]
 )
