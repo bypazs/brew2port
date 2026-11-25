@@ -2,7 +2,7 @@ import Foundation
 
 /// Where an update comes from. MacPorts and Codex have their own code paths;
 /// these are the other package managers PortCat can look at.
-enum ExtraSource: String {
+enum ExtraSource: String, CaseIterable {
     case brew = "Homebrew"
     case brewCask = "Homebrew app"
     case npm = "npm"

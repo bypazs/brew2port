@@ -3,6 +3,7 @@ import UserNotifications
 
 enum NotifyID {
     static let updateAction = "UPDATE_NOW"
+    static let snoozeAction = "SNOOZE"
     static let codexCategory = "CODEX_UPDATE"
     static let portsCategory = "PORTS_UPDATE"
     static let extrasCategory = "EXTRAS_UPDATE"
@@ -14,6 +15,8 @@ enum NotifyID {
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Called with the category when the user presses the update button.
     var onUpdate: ((String) -> Void)?
+    /// Called when the user presses "Remind me tomorrow".
+    var onSnooze: (() -> Void)?
     /// Called when the user clicks the notification itself.
     var onOpen: (() -> Void)?
 
@@ -24,19 +27,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard available else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        let codex = UNNotificationCategory(
-            identifier: NotifyID.codexCategory,
-            actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: "Update now", options: [])],
-            intentIdentifiers: [])
-        let ports = UNNotificationCategory(
-            identifier: NotifyID.portsCategory,
-            actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: "Upgrade all", options: [])],
-            intentIdentifiers: [])
-        let extras = UNNotificationCategory(
-            identifier: NotifyID.extrasCategory,
-            actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: "Update now", options: [])],
-            intentIdentifiers: [])
-        center.setNotificationCategories([codex, ports, extras])
+        let snooze = UNNotificationAction(identifier: NotifyID.snoozeAction, title: "Remind me tomorrow", options: [])
+        func category(_ id: String, _ title: String) -> UNNotificationCategory {
+            UNNotificationCategory(
+                identifier: id,
+                actions: [UNNotificationAction(identifier: NotifyID.updateAction, title: title, options: []), snooze],
+                intentIdentifiers: [])
+        }
+        center.setNotificationCategories([
+            category(NotifyID.codexCategory, "Update now"),
+            category(NotifyID.portsCategory, "Upgrade all"),
+            category(NotifyID.extrasCategory, "Update now"),
+        ])
     }
 
     func post(id: String, title: String, body: String, category: String) {
@@ -61,6 +63,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         Task { @MainActor in
             if action == NotifyID.updateAction {
                 self.onUpdate?(category)
+            } else if action == NotifyID.snoozeAction {
+                self.onSnooze?()
             } else if action == UNNotificationDefaultActionIdentifier {
                 self.onOpen?()
             }

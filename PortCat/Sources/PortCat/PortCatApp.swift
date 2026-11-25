@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        notifier.onSnooze = { [weak self] in self?.manager.snoozeAlerts() }
         notifier.onOpen = { [weak self] in self?.showPopover() }
         manager.notifier = notifier
 

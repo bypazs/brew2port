@@ -29,6 +29,8 @@ It also helps you get off Homebrew:
 | **Update** (Other apps) | Lists outdated Homebrew formulae and apps, npm global packages and App Store apps (needs [`mas`](https://github.com/mas-cli/mas)). Homebrew apps update in Terminal because their installers can ask for a password; the rest update in the background. **Update all** does everything in one go |
 | **Clean up** | The MacPorts side: `port reclaim` removes old versions, unused downloads and unneeded dependencies |
 
+The gear menu at the bottom lets you choose which sources the cat checks (for example, turn off npm) and pause notifications for a day or a week.
+
 Homebrew itself is never uninstalled, since it can't be reinstalled on Intel Macs.
 
 It checks for outdated ports (and a newer Codex, if you have it) on its own every 3 hours and whenever you open it. When something new turns up it sends a macOS notification with an **Update now** / **Upgrade all** button, once per new version. macOS asks the first time whether PortCat may send notifications; you can change that later in System Settings → Notifications. Those checks don't need a password. Anything that changes your system (syncing the package list, upgrading, cleaning up) shows the standard macOS password dialog each time, and nothing runs as root in the background.

@@ -386,6 +386,42 @@ struct PopoverView: View {
 
     // MARK: Footer
 
+    private var settingsMenu: some View {
+        Menu {
+            Section("Look for updates in") {
+                ForEach(sourceToggles, id: \.key) { item in
+                    Toggle(item.label, isOn: Binding(
+                        get: { manager.isEnabled(item.key) },
+                        set: { manager.setEnabled(item.key, $0) }))
+                }
+            }
+            Section("Notifications") {
+                if manager.isSnoozed, let until = manager.snoozedUntil {
+                    Button("Resume (paused until \\(until.formatted(date: .abbreviated, time: .shortened)))") {
+                        manager.resumeAlerts()
+                    }
+                } else {
+                    Button("Pause for a day") { manager.snoozeAlerts(days: 1) }
+                    Button("Pause for a week") { manager.snoozeAlerts(days: 7) }
+                }
+            }
+        } label: {
+            Image(systemName: manager.isSnoozed ? "bell.slash" : "gearshape")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Choose what I check, or pause notifications")
+    }
+
+    private var sourceToggles: [(key: String, label: String)] {
+        [(ExtraSource.brew.rawValue, "Homebrew tools"),
+         (ExtraSource.brewCask.rawValue, "Homebrew apps"),
+         (ExtraSource.npm.rawValue, "npm packages"),
+         (ExtraSource.appStore.rawValue, "App Store"),
+         (PortManager.codexKey, "Codex")]
+    }
+
     private var footer: some View {
         HStack {
             Toggle("Open at login", isOn: Binding(
@@ -394,6 +430,7 @@ struct PopoverView: View {
                 .toggleStyle(.checkbox)
                 .font(.caption)
             Spacer()
+            settingsMenu
             Link("☕ Buy me a coffee", destination: URL(string: "https://buymeacoffee.com/bypazs")!)
                 .font(.caption)
                 .help("Support PortCat and brew2port")

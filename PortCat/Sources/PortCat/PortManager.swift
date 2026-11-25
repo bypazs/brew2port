@@ -46,6 +46,36 @@ final class PortManager: NSObject, ObservableObject {
     @Published private(set) var extras: [ExtraUpdate] = [] { didSet { if oldValue != extras { onChange?() } } }
     private var lastBrewUpdate: Date?
     private static let notifiedExtrasKey = "notifiedExtras"
+    private static let disabledKey = "disabledSources"
+    private static let snoozeKey = "snoozedUntil"
+    static let codexKey = "Codex"
+
+    /// Sources you turned off (ExtraSource raw values, or "Codex").
+    @Published private(set) var disabledSources: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: PortManager.disabledKey) ?? [])
+    /// Notifications are paused until this time. The cat and the list still update.
+    @Published private(set) var snoozedUntil: Date? =
+        UserDefaults.standard.object(forKey: PortManager.snoozeKey) as? Date
+
+    var isSnoozed: Bool { snoozedUntil.map { $0 > Date() } ?? false }
+    func isEnabled(_ source: String) -> Bool { !disabledSources.contains(source) }
+
+    func setEnabled(_ source: String, _ enabled: Bool) {
+        if enabled { disabledSources.remove(source) } else { disabledSources.insert(source) }
+        UserDefaults.standard.set(Array(disabledSources).sorted(), forKey: Self.disabledKey)
+        Task { await refresh() }
+    }
+
+    func snoozeAlerts(days: Int = 1) {
+        let until = Calendar.current.date(byAdding: .day, value: days, to: Date())
+        snoozedUntil = until
+        UserDefaults.standard.set(until, forKey: Self.snoozeKey)
+    }
+
+    func resumeAlerts() {
+        snoozedUntil = nil
+        UserDefaults.standard.removeObject(forKey: Self.snoozeKey)
+    }
     private static let notifiedCodexKey = "notifiedCodexVersion"
     private static let notifiedPortsKey = "notifiedPorts"
 
@@ -132,7 +162,7 @@ final class PortManager: NSObject, ObservableObject {
     private func checkExtras() async {
         var found: [ExtraUpdate] = []
 
-        if let brew = Self.brewPath {
+        if let brew = Self.brewPath, isEnabled(ExtraSource.brew.rawValue) || isEnabled(ExtraSource.brewCask.rawValue) {
             // Refresh Homebrew's index now and then, otherwise "outdated" goes stale.
             if lastBrewUpdate == nil || Date().timeIntervalSince(lastBrewUpdate!) > 6 * 3600 {
                 _ = await Shell.run(brew, ["update", "--quiet"], extraEnv: ["HOMEBREW_NO_ENV_HINTS": "1"])
@@ -141,16 +171,16 @@ final class PortManager: NSObject, ObservableObject {
             let result = await Shell.run(brew, ["outdated", "--json=v2"], extraEnv: Self.brewEnv)
             if result.succeeded { found += Extras.parseBrew(result.output) }
         }
-        if let npm = Extras.locate("npm") {
+        if let npm = Extras.locate("npm"), isEnabled(ExtraSource.npm.rawValue) {
             // Exit code 1 only means "something is outdated".
             let result = await Shell.run(npm, ["outdated", "-g", "--json"], extraEnv: Extras.environment(for: npm))
             found += Extras.parseNpm(result.output)
         }
-        if let mas = Extras.locate("mas") {
+        if let mas = Extras.locate("mas"), isEnabled(ExtraSource.appStore.rawValue) {
             let result = await Shell.run(mas, ["outdated"], extraEnv: Extras.environment(for: mas))
             if result.succeeded { found += Extras.parseMas(result.output) }
         }
-        extras = found
+        extras = found.filter { isEnabled($0.source.rawValue) }
         notifyExtrasIfNeeded()
     }
 
@@ -234,7 +264,7 @@ final class PortManager: NSObject, ObservableObject {
 
     /// Notifies once per new set of versions, not on every check.
     private func notifyExtrasIfNeeded() {
-        guard !extras.isEmpty else { return }
+        guard !isSnoozed, !extras.isEmpty else { return }
         let current = Set(extras.map { "\($0.id)@\($0.latest)" })
         let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedExtrasKey) ?? [])
         guard !current.isSubset(of: seen) else { return }
@@ -249,7 +279,7 @@ final class PortManager: NSObject, ObservableObject {
     // MARK: - Codex (updates through its own installer)
 
     private func checkCodex() async {
-        guard let path = Codex.locate() else { codex = nil; return }
+        guard isEnabled(Self.codexKey), let path = Codex.locate() else { codex = nil; return }
         let result = await Shell.run(path, ["--version"])
         guard result.succeeded, let current = Codex.parseVersion(result.output) else { codex = nil; return }
         // Ask the network at most once an hour.
@@ -308,7 +338,7 @@ final class PortManager: NSObject, ObservableObject {
     }
 
     private func notifyCodexIfNeeded() {
-        guard let status = codex, status.updateAvailable, let latest = status.latest,
+        guard !isSnoozed, let status = codex, status.updateAvailable, let latest = status.latest,
               UserDefaults.standard.string(forKey: Self.notifiedCodexKey) != latest else { return }
         UserDefaults.standard.set(latest, forKey: Self.notifiedCodexKey)
         notifier?.post(id: "codex-\(latest)",
@@ -319,7 +349,7 @@ final class PortManager: NSObject, ObservableObject {
 
     /// Notifies once per new version, not on every check.
     private func notifyPortsIfNeeded() {
-        guard !outdated.isEmpty else { return }
+        guard !isSnoozed, !outdated.isEmpty else { return }
         let current = Set(outdated.map { "\($0.name)@\($0.latest)" })
         let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedPortsKey) ?? [])
         guard !current.isSubset(of: seen) else { return }
