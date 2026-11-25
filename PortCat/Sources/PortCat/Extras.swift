@@ -53,6 +53,7 @@ enum Extras {
     // MARK: - Commands
 
     /// The program and arguments that upgrade one item, or nil if the name looks unsafe.
+    @MainActor
     static func upgradeCommand(for item: ExtraUpdate) -> (executable: String, arguments: [String])? {
         guard isValidName(item.name) || item.source == .appStore else { return nil }
         switch item.source {
