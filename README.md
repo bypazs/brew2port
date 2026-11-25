@@ -66,6 +66,12 @@ nvm             -              # "-" means skip
 
 Some tools simply aren't in MacPorts (for example `nvm`, or CLIs from third-party taps like `supabase/tap/supabase`). Skip them and keep the Homebrew copy, or install them another way. Homebrew keeps working on Intel Macs until at least September 2027.
 
+**Codex CLI (Intel Mac):** Codex isn't moved to MacPorts. brew2port marks it "own installer" and prints the official command. Install and update Codex with it, because updating a Homebrew copy can fail with an error. `--checkup` reminds you too. brew2port never runs it for you.
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
 ## Keeping it healthy: `--checkup`
 
 Run this every week or two after migrating:
@@ -121,6 +127,10 @@ cd PortCat && ./build-app.sh --install
 - สำรองรายการแพ็กเกจให้อัตโนมัติ ลงตัวใหม่สำเร็จก่อนค่อยลบตัวเก่า และไม่ถอน Homebrew ทิ้ง
 - แอป GUI (cask) ไม่ต้องย้าย ใช้ต่อได้ปกติ
 - ตัวไหนหาชื่อไม่เจอ ใช้ `port search ชื่อ` แล้วใส่ในไฟล์ `--map`
+- ถ้าลง Codex บน Mac Intel ให้อัปเดตด้วยคำสั่งนี้แทนวิธีเดิม (วิธีเดิมจะทำให้อัปเดตไม่ได้และขึ้น error):
+  ```bash
+  curl -fsSL https://chatgpt.com/codex/install.sh | sh
+  ```
 
 ## Support
 

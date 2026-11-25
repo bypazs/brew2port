@@ -13,7 +13,7 @@
 
 set -u
 
-VERSION="0.5.0"
+VERSION="0.5.1"
 MACPORTS_FALLBACK="2.12.6"   # used if the latest version can't be detected
 APPLY=0
 UNINSTALL_BREW=0
@@ -140,6 +140,10 @@ mkdir -p "$OUT_DIR" || die "Can't create $OUT_DIR"
 LOG="$OUT_DIR/brew2port.log"
 : >"$LOG"
 
+if [ "$(uname -m)" = "arm64" ]; then
+  warn "This is an Apple Silicon Mac. Homebrew is fully supported here — you probably don't need to migrate."
+fi
+
 # ---------- MacPorts: find it, or offer to install it ----------
 install_macports() {
   local major name ver file base pkg chk want got
@@ -218,10 +222,6 @@ if ! command -v port >/dev/null 2>&1; then
   fi
 fi
 
-if [ "$(uname -m)" = "arm64" ]; then
-  warn "This is an Apple Silicon Mac. Homebrew is fully supported here — you probably don't need to migrate."
-fi
-
 # ---------- shared: PATH order check ----------
 check_path_order() {
   local pos_port=-1 pos_brew=-1 i=0 d
@@ -241,6 +241,16 @@ check_path_order() {
     return 1
   fi
   return 0
+}
+
+# ---------- tools that update through their own installer ----------
+# Prints the install/update command for tools that ship an official installer.
+# These are not moved to MacPorts: a same-named port may be a different
+# package, and updating a package-manager copy can fail (Codex on Intel Macs).
+external_installer() {
+  case "$1" in
+    codex) echo "curl -fsSL https://chatgpt.com/codex/install.sh | sh" ;;
+  esac
 }
 
 rule() { say ""; say "${C_BLU}━━━━━━━━━━━━━━━━━━━━ $* ━━━━━━━━━━━━━━━━━━━━${C_OFF}"; }
@@ -312,6 +322,9 @@ run_checkup() {
   say ""
   say "Tip: free disk space from old versions with:  sudo port reclaim"
   say "Security: keeping ports upgraded is how fixes arrive — run --checkup every week or two."
+  if command -v codex >/dev/null 2>&1; then
+    say "Codex: update it with its own installer (other ways can fail):  $(external_installer codex)"
+  fi
   if [ "$n_out" -eq 0 ] && [ "$diag_ok" = "ok" ] && [ "$path_ok" = "ok" ]; then
     say ""; info "All good!  ٩(◕‿◕)۶"
   fi
@@ -385,7 +398,7 @@ printf 'brew\tport\tstatus\n' >"$PLAN"
 leaves="$(brew leaves --installed-on-request 2>>"$LOG")" || die "brew leaves failed (see $LOG)"
 [ -n "$leaves" ] || die "No formulae installed on request — nothing to migrate."
 
-n_ok=0; n_missing=0; n_skip=0
+n_ok=0; n_missing=0; n_skip=0; n_ext=0; ext_notes=""
 for full in $leaves; do
   short="${full##*/}"          # supabase/tap/supabase -> supabase
   target=""; status=""
@@ -393,8 +406,15 @@ for full in $leaves; do
   mapped="$(user_map "$full")"
   [ -n "$mapped" ] || mapped="$(user_map "$short")"
 
+  ext_cmd=""
+  [ -n "$mapped" ] || ext_cmd="$(external_installer "$short")"
+
   if [ "$mapped" = "-" ]; then
     status="skip"
+  elif [ -n "$ext_cmd" ]; then
+    status="external"
+    ext_notes="${ext_notes}${short}	${ext_cmd}
+"
   elif [ -n "$mapped" ]; then
     if port_exists "$mapped"; then target="$mapped"; status="ok"
     else target="$mapped"; status="missing"; fi
@@ -410,6 +430,7 @@ for full in $leaves; do
     ok)      n_ok=$((n_ok+1)) ;;
     missing) n_missing=$((n_missing+1)) ;;
     skip)    n_skip=$((n_skip+1)) ;;
+    external) n_ext=$((n_ext+1)) ;;
   esac
 done
 
@@ -422,18 +443,35 @@ tail -n +2 "$PLAN" | while IFS=$'\t' read -r b p s; do
     ok)      col="$C_GRN"; label="will install" ;;
     missing) col="$C_YEL"; label="no match — add it to a --map file" ;;
     skip)    col="$C_DIM"; label="skipped (map)" ;;
+    external) col="$C_BLU"; label="own installer — see note below" ;;
   esac
   printf '%-32s %-24s %s%s%s\n' "$b" "$p" "$col" "$label" "$C_OFF"
   printf '%-32s %-24s %s\n' "$b" "$p" "$label" >>"$LOG"
 done
 say ""
-say "Matched: $n_ok   No match: $n_missing   Skipped: $n_skip"
+say "Matched: $n_ok   No match: $n_missing   Skipped: $n_skip   Own installer: $n_ext"
 
 casks="$(brew list --cask 2>/dev/null)"
 if [ -n "$casks" ]; then
   say ""
   info "Casks (GUI apps) — not migrated, they keep working from /Applications:"
-  for c in $casks; do say "   $c"; done
+  for c in $casks; do
+    say "   $c"
+    cmd="$(external_installer "$c")"
+    if [ -n "$cmd" ] && ! printf '%s' "$ext_notes" | grep -q "^$c	"; then
+      ext_notes="${ext_notes}${c}	${cmd}
+"
+    fi
+  done
+fi
+
+if [ -n "$ext_notes" ]; then
+  say ""
+  info "These update through their own installer, not MacPorts. Run it to install or update:"
+  printf '%s' "$ext_notes" | while IFS=$'\t' read -r t c; do
+    [ -n "$t" ] && say "   $t:  $c"
+  done
+  say "   (brew2port never runs these for you. Updating the Homebrew copy can fail on Intel.)"
 fi
 
 say ""
@@ -450,7 +488,7 @@ fi
 if [ "$n_ok" -eq 0 ]; then
   say ""
   ok "Nothing left to move — everything that has a MacPorts version is already there.  (｀・ω・´)b"
-  if [ "$n_missing" -gt 0 ]; then
+  if [ $((n_missing + n_ext)) -gt 0 ]; then
     say "   What's left has no MacPorts port, so it stays in Homebrew. That's fine:"
     say "   Homebrew keeps working on Intel Macs until at least September 2027."
   fi
@@ -484,7 +522,7 @@ while IFS=$'\t' read -r b p s; do
     ok "$p already installed"; pstat="already there"
   else
     info "Installing $p  (from brew: $b)"
-    if sudo port -N install "$p" >>"$LOG" 2>&1; then
+    if sudo port -N install "$p" >>"$LOG" 2>&1 </dev/null; then
       ok "Installed $p"; pstat="installed"
     else
       err "Failed to install $p — Homebrew copy of $b left untouched (see log)"
@@ -496,7 +534,7 @@ while IFS=$'\t' read -r b p s; do
   done_ok=$((done_ok+1))
 
   if [ "$UNINSTALL_BREW" -eq 1 ]; then
-    if brew uninstall "$b" >>"$LOG" 2>&1; then
+    if brew uninstall "$b" >>"$LOG" 2>&1 </dev/null; then
       ok "Removed Homebrew $b"; bstat="removed"
     else
       warn "Kept Homebrew $b (something else still depends on it)"
@@ -541,7 +579,7 @@ n_casks="$(brew list --cask 2>/dev/null | grep -c .)"
 sum ""
 sum "  Moved to MacPorts : $done_ok"
 sum "  Failed            : $done_fail"
-[ -n "$not_moved" ] && sum "  Left in Homebrew  : $not_moved  (no match or skipped)"
+[ -n "$not_moved" ] && sum "  Left in Homebrew  : $not_moved  (no match, own installer or skipped)"
 [ -n "$kept" ]      && sum "  Kept in Homebrew  :$kept  (other formulae need them)"
 [ -n "$orphans" ]   && sum "  Cleaned up deps   : $orphans"
 [ "$n_casks" -gt 0 ] && sum "  GUI apps (casks)  : $n_casks, unchanged"

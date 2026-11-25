@@ -1,5 +1,10 @@
 # Changelog
 
+## brew2port 0.5.1
+- Codex (formula or cask) is now marked "own installer" instead of "no match", and the official `curl -fsSL https://chatgpt.com/codex/install.sh | sh` command is shown. `--checkup` prints the same tip when `codex` is installed. The script never runs it.
+- `port install` / `brew uninstall` no longer read stdin, so they can't swallow the rest of the plan being read in the apply loop.
+- The Apple Silicon warning now appears before the MacPorts install prompt.
+
 ## brew2port 0.5.0 · PortCat 0.3.0 — first public release
 
 ### brew2port.sh
