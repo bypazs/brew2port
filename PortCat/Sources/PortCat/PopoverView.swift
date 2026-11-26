@@ -152,7 +152,9 @@ struct PopoverView: View {
                 }
                 Text(codex.standalone
                      ? "Uses the official Codex installer. No password needed."
-                     : "Opens Terminal and runs the official Codex installer. If it asks about your Homebrew or npm copy, removing it makes future updates one click.")
+                     : codex.path.hasPrefix("/opt/local")
+                        ? "Your copy came from MacPorts, which can't update it. This opens Terminal and installs Codex with the official installer. Afterwards run \"sudo port uninstall codex\" so the new copy is the one used."
+                        : "Opens Terminal and runs the official Codex installer. If it asks about your Homebrew or npm copy, removing it makes future updates one click.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

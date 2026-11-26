@@ -19,6 +19,8 @@ struct CodexStatus: Equatable {
 /// Updating a Homebrew copy on Intel Macs can fail, so PortCat always uses
 /// the official script.
 enum Codex {
+    /// The MacPorts port of the same name. It can't be updated reliably, so PortCat leaves it alone.
+    static let portName = "codex"
     static let installCommand = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
 
     static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
@@ -56,7 +58,8 @@ enum Codex {
     /// channel first, then GitHub Releases. Tags look like "rust-v0.151.0".
     static func latestVersion() async -> String? {
         let sources = ["https://releases.openai.com/codex/channels/latest",
-                       "https://api.github.com/repos/openai/codex/releases/latest"]
+                       "https://api.github.com/repos/openai/codex/releases/latest",
+                       "https://registry.npmjs.org/@openai/codex/latest"]
         for source in sources {
             guard let url = URL(string: source) else { continue }
             var request = URLRequest(url: url)
@@ -65,7 +68,8 @@ enum Codex {
             guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tag = json["tag_name"] as? String, tag.hasPrefix("rust-v"),
+                  let tag = (json["tag_name"] as? String).flatMap({ $0.hasPrefix("rust-v") ? $0 : nil })
+                      ?? (json["version"] as? String),
                   let version = parseVersion(tag) else { continue }
             return version
         }

@@ -150,7 +150,8 @@ final class PortManager: NSObject, ObservableObject {
         async let versionResult = Shell.run(Self.portPath, ["version"])
         let (o, r, v) = await (outdatedResult, requestedResult, versionResult)
 
-        outdated = Self.parseOutdated(o.output)
+        // The MacPorts codex port can't be updated reliably; Codex has its own updater.
+        outdated = Self.parseOutdated(o.output).filter { $0.name != Codex.portName }
         requested = Self.parseNames(r.output)
         version = v.output.components(separatedBy: ":").last?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -452,7 +453,7 @@ final class PortManager: NSObject, ObservableObject {
     /// Syncs and upgrades everything in one password prompt.
     func upgradeAll() async {
         let ok = await admin("Upgrading \(outdated.count) port(s)…",
-                             "\(Self.portPath) -N selfupdate && \(Self.portPath) -N upgrade outdated")
+                             "\(Self.portPath) -N selfupdate && \(Self.portPath) -N upgrade outdated and not \(Codex.portName)")
         if ok { markSynced() }
         await refresh()
         if ok { celebrate() }
