@@ -390,11 +390,13 @@ struct PopoverView: View {
 
     private var settingsMenu: some View {
         Menu {
-            Section("Look for updates in") {
-                ForEach(sourceToggles, id: \.key) { item in
-                    Toggle(item.label, isOn: Binding(
-                        get: { manager.isEnabled(item.key) },
-                        set: { manager.setEnabled(item.key, $0) }))
+            if !sourceToggles.isEmpty {
+                Section("Look for updates in") {
+                    ForEach(sourceToggles, id: \.key) { item in
+                        Toggle(item.label, isOn: Binding(
+                            get: { manager.isEnabled(item.key) },
+                            set: { manager.setEnabled(item.key, $0) }))
+                    }
                 }
             }
             Section("Notifications") {
@@ -416,12 +418,17 @@ struct PopoverView: View {
         .help("Choose what I check, or pause notifications")
     }
 
+    /// Only the sources that exist on this Mac, so the menu isn't full of things that don't apply.
     private var sourceToggles: [(key: String, label: String)] {
-        [(ExtraSource.brew.rawValue, "Homebrew tools"),
-         (ExtraSource.brewCask.rawValue, "Homebrew apps"),
-         (ExtraSource.npm.rawValue, "npm packages"),
-         (ExtraSource.appStore.rawValue, "App Store"),
-         (PortManager.codexKey, "Codex")]
+        var list: [(key: String, label: String)] = []
+        if PortManager.brewPath != nil {
+            list.append((ExtraSource.brew.rawValue, "Homebrew tools"))
+            list.append((ExtraSource.brewCask.rawValue, "Homebrew apps"))
+        }
+        if Extras.locate("npm") != nil { list.append((ExtraSource.npm.rawValue, "npm packages")) }
+        if Extras.locate("mas") != nil { list.append((ExtraSource.appStore.rawValue, "App Store")) }
+        if Codex.locate() != nil { list.append((PortManager.codexKey, "Codex")) }
+        return list
     }
 
     private var footer: some View {
