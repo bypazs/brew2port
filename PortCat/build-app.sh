@@ -13,11 +13,12 @@ cd "$(dirname "$0")"
 VERSION="0.4.1"
 BUNDLE_ID="io.github.brew2port.portcat"
 INSTALL=0
+UNIVERSAL=0
 ARCH_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --install) INSTALL=1 ;;
-    --universal) ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
+    --universal) UNIVERSAL=1; ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
   esac
 done
@@ -31,14 +32,19 @@ build_with_swiftc() {
     *)     target="x86_64-apple-macos13.0" ;;
   esac
   mkdir -p build
-  swiftc -O -parse-as-library -target "$target" Sources/PortCat/*.swift -o build/PortCat-swiftc
+  # `|| return 1`: set -e is off inside a function called from `if`, so check by hand.
+  swiftc -O -parse-as-library -target "$target" Sources/PortCat/*.swift -o build/PortCat-swiftc || return 1
   BIN="build/PortCat-swiftc"
 }
 
 echo "==> Building PortCat (release)…"
 if [ "${PORTCAT_USE_SWIFTC:-0}" = "1" ]; then
+  if [ "$UNIVERSAL" = 1 ]; then
+    echo "✘ --universal can't be combined with PORTCAT_USE_SWIFTC=1 (it needs SwiftPM)."
+    exit 1
+  fi
   echo "    (PORTCAT_USE_SWIFTC=1, compiling with swiftc directly)"
-  build_with_swiftc
+  build_with_swiftc || exit 1
 elif swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"}; then
   BIN="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --show-bin-path)/PortCat"
 else
@@ -46,7 +52,7 @@ else
   echo "! swift build failed. If the error above mentions \"Invalid manifest\" or"
   echo "  \"PackageDescription\", your Command Line Tools install is probably damaged."
   echo "  Trying a direct swiftc build instead…"
-  if [ ${#ARCH_ARGS[@]} -gt 0 ]; then
+  if [ "$UNIVERSAL" = 1 ]; then
     echo "✘ --universal needs a working SwiftPM. Reinstall the Command Line Tools:"
     echo "    sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
     exit 1
