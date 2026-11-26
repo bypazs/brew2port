@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws PortCat's app icon (the sitting cat on a dark rounded square).
+"""Draws PortCat's app icon from the waving tabby sprite.
 
 The cat comes from Sources/PortCat/CatFrames.swift, so the icon always matches
 the menu bar cat. Needs Pillow:  pip install pillow
@@ -13,9 +13,16 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 FRAMES = HERE.parent / "Sources" / "PortCat" / "CatFrames.swift"
 
-FUR = (244, 244, 247)       # cat
-ACCENT = (255, 122, 176)    # nose and blush
-TOP, BOTTOM = (38, 58, 104), (14, 22, 48)   # background gradient
+PALETTE = {
+    "o": (64, 41, 48),
+    "#": (255, 235, 207),
+    "t": (235, 143, 84),
+    "x": (64, 41, 48),
+    "+": (255, 135, 158),
+    "~": (94, 211, 209),
+    "*": (255, 194, 107),
+}
+TOP, BOTTOM = (45, 114, 112), (25, 51, 68)
 SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
 
@@ -51,12 +58,21 @@ def render(size):
     cells = [(x, y, ch) for y, row in enumerate(grid) for x, ch in enumerate(row) if ch != "."]
     x0, x1 = min(c[0] for c in cells), max(c[0] for c in cells)
     y0, y1 = min(c[1] for c in cells), max(c[1] for c in cells)
-    unit = int(body * 0.62) // max(x1 - x0 + 1, y1 - y0 + 1)
+    unit = int(body * 0.77) // max(x1 - x0 + 1, y1 - y0 + 1)
     left = margin + (body - unit * (x1 - x0 + 1)) // 2
     top = margin + (body - unit * (y1 - y0 + 1)) // 2
     draw = ImageDraw.Draw(out)
+    shadow_width = (x1 - x0 + 1) * unit
+    floor = top + (y1 - y0 + 1) * unit
+    draw.ellipse((left, floor - unit, left + shadow_width, floor + unit),
+                 fill=(21, 53, 65))
+    for dx, dy, color in [(3, 0, (152, 221, 208)), (shadow_width // unit - 3, 2, PALETTE["*"])]:
+        cx, cy = left + dx * unit, top + dy * unit
+        arm = unit if dx == 3 else unit * 3 // 4
+        draw.polygon([(cx, cy - arm), (cx + arm, cy), (cx, cy + arm), (cx - arm, cy)],
+                     fill=color)
     for x, y, ch in cells:
-        color = ACCENT if ch == "+" else FUR
+        color = PALETTE[ch]
         px0, py0 = left + (x - x0) * unit, top + (y - y0) * unit
         draw.rectangle((px0, py0, px0 + unit - 1, py0 + unit - 1), fill=color)
     return out.resize((size, size), Image.LANCZOS)

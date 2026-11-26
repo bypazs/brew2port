@@ -3,16 +3,23 @@ import SwiftUI
 /// The big animated cat at the top of the popover.
 struct CatView: View {
     let mood: CatMood
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var startedAt = Date()
     private static let frames: [CatMood: [NSImage]] = Dictionary(
         uniqueKeysWithValues: CatMood.allCases.map { ($0, CatArt.frames(for: $0, pixel: 4, template: false)) })
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / mood.fps)) { context in
-            let frames = Self.frames[mood] ?? []
-            if !frames.isEmpty {
-                let index = Int(context.date.timeIntervalSinceReferenceDate * mood.fps) % frames.count
-                Image(nsImage: frames[index])
-                    .interpolation(.none)
+        Group {
+            if let frames = Self.frames[mood], let first = frames.first {
+                if reduceMotion {
+                    Image(nsImage: first).interpolation(.none)
+                } else {
+                    TimelineView(.periodic(from: startedAt, by: 1.0 / mood.fps)) { context in
+                        let elapsed = max(0, context.date.timeIntervalSince(startedAt))
+                        let index = Int(elapsed * mood.fps) % frames.count
+                        Image(nsImage: frames[index]).interpolation(.none)
+                    }
+                }
             }
         }
         .frame(width: 88, height: 64)
@@ -58,7 +65,7 @@ struct PopoverView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            CatView(mood: manager.mood)
+            CatView(mood: manager.mood).id(manager.mood)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline)
                 Text(subtitle).font(.callout).foregroundStyle(.secondary)
