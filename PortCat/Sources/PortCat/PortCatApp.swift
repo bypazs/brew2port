@@ -17,6 +17,7 @@ struct PortCatMain {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let manager = PortManager()
+    private let notifier = Notifier()
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var menuFrames: [CatMood: [NSImage]] = [:]
@@ -40,6 +41,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: PopoverView(manager: manager))
+
+        notifier.setup()
+        notifier.onUpdate = { [weak self] category in
+            guard let manager = self?.manager else { return }
+            Task {
+                switch category {
+                case NotifyID.codexCategory:  await manager.updateCodex()
+                case NotifyID.extrasCategory: await manager.updateAllExtras()
+                default:                      await manager.upgradeAll()
+                }
+            }
+        }
+        notifier.onSnooze = { [weak self] in self?.manager.snoozeAlerts() }
+        notifier.onOpen = { [weak self] in self?.showPopover() }
+        manager.notifier = notifier
 
         manager.onChange = { [weak self] in self?.stateChanged() }
         stateChanged()
@@ -73,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateBadge() {
-        let count = manager.outdated.count
+        let count = manager.updateCount
         guard let button = statusItem?.button else { return }
         if count > 0 && !manager.isBusy {
             button.attributedTitle = NSAttributedString(
@@ -95,5 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             if !manager.isBusy { Task { await manager.refresh() } }
         }
+    }
+
+    private func showPopover() {
+        guard !popover.isShown else { return }
+        togglePopover(nil)
     }
 }

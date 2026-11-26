@@ -31,6 +31,9 @@ struct PopoverView: View {
                 ProgressView().progressViewStyle(.linear)
             }
 
+            codexSection
+            extrasSection
+
             if !manager.isInstalled {
                 notInstalled
             } else {
@@ -74,7 +77,7 @@ struct PopoverView: View {
         case .running:  return manager.busyMessage ?? "Working…"
         case .happy:    return "All done!"
         case .sad:      return manager.isInstalled ? "Something needs a look" : "MacPorts not found"
-        case .waving:   return "\(manager.outdated.count) update\(manager.outdated.count == 1 ? "" : "s") available"
+        case .waving:   return "\(manager.updateCount) update\(manager.updateCount == 1 ? "" : "s") available"
         case .sleeping: return "All up to date"
         }
     }
@@ -84,12 +87,80 @@ struct PopoverView: View {
         case .running:  return "Hang on, I'm on it! ε=ε=(ﾉ≧∀≦)ﾉ"
         case .happy:    return "Otsukaresama~ (๑•̀ㅂ•́)و✧"
         case .sad:      return manager.isInstalled ? "See below (´・ω・`)" : "I need MacPorts to work (´；ω；`)"
-        case .waving:   return "Psst! Some ports want upgrading"
+        case .waving:   return "Psst! Some updates are waiting"
         case .sleeping: return "Nothing to do… zzz (－ω－)"
         }
     }
 
     // MARK: Sections
+
+    @ViewBuilder
+    private var extrasSection: some View {
+        if !manager.extras.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Other apps").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if manager.extras.count > 1 {
+                        Button("Update all") { Task { await manager.updateAllExtras() } }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(manager.isBusy)
+                    }
+                }
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(manager.extras) { item in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.title).font(.callout.weight(.medium))
+                                    Text("\(item.source.rawValue) · \(item.current) → \(item.latest)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(item.needsTerminal ? "Update…" : "Update") {
+                                    Task { await manager.updateExtra(item) }
+                                }
+                                .controlSize(.small)
+                                .disabled(manager.isBusy)
+                                .help(item.needsTerminal ? "Opens Terminal, since the installer may ask for your password" : "Updates in the background")
+                            }
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(manager.extras.count) * 36, 150))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var codexSection: some View {
+        if let codex = manager.codex, codex.updateAvailable, let latest = codex.latest {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Codex").font(.callout.weight(.medium))
+                        Text("\(codex.current) → \(latest)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(codex.standalone ? "Update" : "Update…") { Task { await manager.updateCodex() } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(manager.isBusy)
+                        .help(Codex.installCommand)
+                }
+                Text(codex.standalone
+                     ? "Uses the official Codex installer. No password needed."
+                     : codex.path.hasPrefix("/opt/local")
+                        ? "Your copy came from MacPorts, which can't update it. This opens Terminal and installs Codex with the official installer. Afterwards run \"sudo port uninstall codex\" so the new copy is the one used."
+                        : "Opens Terminal and runs the official Codex installer. If it asks about your Homebrew or npm copy, removing it makes future updates one click.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
     private var notInstalled: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -317,6 +388,49 @@ struct PopoverView: View {
 
     // MARK: Footer
 
+    private var settingsMenu: some View {
+        Menu {
+            if !sourceToggles.isEmpty {
+                Section("Look for updates in") {
+                    ForEach(sourceToggles, id: \.key) { item in
+                        Toggle(item.label, isOn: Binding(
+                            get: { manager.isEnabled(item.key) },
+                            set: { manager.setEnabled(item.key, $0) }))
+                    }
+                }
+            }
+            Section("Notifications") {
+                if manager.isSnoozed, let until = manager.snoozedUntil {
+                    Button("Resume (paused until \(until.formatted(date: .abbreviated, time: .shortened)))") {
+                        manager.resumeAlerts()
+                    }
+                } else {
+                    Button("Pause for a day") { manager.snoozeAlerts(days: 1) }
+                    Button("Pause for a week") { manager.snoozeAlerts(days: 7) }
+                }
+            }
+        } label: {
+            Image(systemName: manager.isSnoozed ? "bell.slash" : "gearshape")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Choose what I check, or pause notifications")
+    }
+
+    /// Only the sources that exist on this Mac, so the menu isn't full of things that don't apply.
+    private var sourceToggles: [(key: String, label: String)] {
+        var list: [(key: String, label: String)] = []
+        if PortManager.brewPath != nil {
+            list.append((ExtraSource.brew.rawValue, "Homebrew tools"))
+            list.append((ExtraSource.brewCask.rawValue, "Homebrew apps"))
+        }
+        if Extras.locate("npm") != nil { list.append((ExtraSource.npm.rawValue, "npm packages")) }
+        if Extras.locate("mas") != nil { list.append((ExtraSource.appStore.rawValue, "App Store")) }
+        if Codex.locate() != nil { list.append((PortManager.codexKey, "Codex")) }
+        return list
+    }
+
     private var footer: some View {
         HStack {
             Toggle("Open at login", isOn: Binding(
@@ -325,6 +439,7 @@ struct PopoverView: View {
                 .toggleStyle(.checkbox)
                 .font(.caption)
             Spacer()
+            settingsMenu
             Link("☕ Buy me a coffee", destination: URL(string: "https://buymeacoffee.com/bypazs")!)
                 .font(.caption)
                 .help("Support PortCat and brew2port")

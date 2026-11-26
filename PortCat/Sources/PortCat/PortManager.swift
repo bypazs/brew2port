@@ -39,6 +39,48 @@ final class PortManager: NSObject, ObservableObject {
     /// Set after sending the user to Terminal; the next refresh clears the notice.
     private var clearNoticeOnRefresh = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// The Codex CLI, if installed (nil = not found).
+    @Published private(set) var codex: CodexStatus? = nil { didSet { if oldValue != codex { onChange?() } } }
+    private var codexLatest: (version: String, fetched: Date)?
+    /// Updates from Homebrew, npm and the App Store.
+    @Published private(set) var extras: [ExtraUpdate] = [] { didSet { if oldValue != extras { onChange?() } } }
+    private var lastBrewUpdate: Date?
+    private static let notifiedExtrasKey = "notifiedExtras"
+    private static let disabledKey = "disabledSources"
+    private static let snoozeKey = "snoozedUntil"
+    static let codexKey = "Codex"
+
+    /// Sources you turned off (ExtraSource raw values, or "Codex").
+    @Published private(set) var disabledSources: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: PortManager.disabledKey) ?? [])
+    /// Notifications are paused until this time. The cat and the list still update.
+    @Published private(set) var snoozedUntil: Date? =
+        UserDefaults.standard.object(forKey: PortManager.snoozeKey) as? Date
+
+    var isSnoozed: Bool { snoozedUntil.map { $0 > Date() } ?? false }
+    func isEnabled(_ source: String) -> Bool { !disabledSources.contains(source) }
+
+    func setEnabled(_ source: String, _ enabled: Bool) {
+        if enabled { disabledSources.remove(source) } else { disabledSources.insert(source) }
+        UserDefaults.standard.set(Array(disabledSources).sorted(), forKey: Self.disabledKey)
+        Task { await refresh() }
+    }
+
+    func snoozeAlerts(days: Int = 1) {
+        let until = Calendar.current.date(byAdding: .day, value: days, to: Date())
+        snoozedUntil = until
+        UserDefaults.standard.set(until, forKey: Self.snoozeKey)
+    }
+
+    func resumeAlerts() {
+        snoozedUntil = nil
+        UserDefaults.standard.removeObject(forKey: Self.snoozeKey)
+    }
+    private static let notifiedCodexKey = "notifiedCodexVersion"
+    private static let notifiedPortsKey = "notifiedPorts"
+
+    /// Posts macOS notifications; set by the app delegate.
+    var notifier: Notifier?
 
     /// Called whenever something that affects the cat changes.
     var onChange: (@MainActor () -> Void)?
@@ -52,11 +94,14 @@ final class PortManager: NSObject, ObservableObject {
     var isInstalled: Bool { FileManager.default.isExecutableFile(atPath: Self.portPath) }
     var isBusy: Bool { busyMessage != nil }
 
+    /// Outdated ports plus Codex, if it has an update.
+    var updateCount: Int { outdated.count + extras.count + (codex?.updateAvailable == true ? 1 : 0) }
+
     var mood: CatMood {
         if isBusy { return .running }
         if celebrating { return .happy }
         if !isInstalled || problem != nil { return .sad }
-        if !outdated.isEmpty { return .waving }
+        if updateCount > 0 { return .waving }
         return .sleeping
     }
 
@@ -86,8 +131,13 @@ final class PortManager: NSObject, ObservableObject {
     func refresh() async {
         guard !isBusy else { return }
         if clearNoticeOnRefresh { notice = nil; clearNoticeOnRefresh = false }
+        busyMessage = "Checking for updates…"
         await countHomebrewFormulae()
+        await checkCodex()
+        await checkExtras()
         guard isInstalled else {
+            busyMessage = nil
+            lastChecked = Date()
             problem = nil
             outdated = []
             requested = []
@@ -100,13 +150,225 @@ final class PortManager: NSObject, ObservableObject {
         async let versionResult = Shell.run(Self.portPath, ["version"])
         let (o, r, v) = await (outdatedResult, requestedResult, versionResult)
 
-        outdated = Self.parseOutdated(o.output)
+        // The MacPorts codex port can't be updated reliably; Codex has its own updater.
+        outdated = Self.parseOutdated(o.output).filter { $0.name != Codex.portName }
         requested = Self.parseNames(r.output)
         version = v.output.components(separatedBy: ":").last?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         lastChecked = Date()
         busyMessage = nil
         if !o.succeeded { appendLog("port outdated", o.output) }
+        notifyPortsIfNeeded()
+    }
+
+    // MARK: - Homebrew, npm and App Store updates
+
+    private func checkExtras() async {
+        var found: [ExtraUpdate] = []
+
+        if let brew = Self.brewPath, isEnabled(ExtraSource.brew.rawValue) || isEnabled(ExtraSource.brewCask.rawValue) {
+            // Refresh Homebrew's index now and then, otherwise "outdated" goes stale.
+            if lastBrewUpdate == nil || Date().timeIntervalSince(lastBrewUpdate!) > 6 * 3600 {
+                _ = await Shell.run(brew, ["update", "--quiet"], extraEnv: ["HOMEBREW_NO_ENV_HINTS": "1"])
+                lastBrewUpdate = Date()
+            }
+            let result = await Shell.run(brew, ["outdated", "--json=v2"], extraEnv: Self.brewEnv)
+            found += Extras.parseBrew(result.output)
+        }
+        if let npm = Extras.locate("npm"), isEnabled(ExtraSource.npm.rawValue) {
+            // Exit code 1 only means "something is outdated".
+            let env = Extras.environment(for: npm)
+            let prefix = await Shell.run(npm, ["prefix", "-g"], extraEnv: env).output
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let modules = prefix + "/lib/node_modules"
+            let needsAdmin = !prefix.isEmpty && !FileManager.default.isWritableFile(atPath: modules)
+            let result = await Shell.run(npm, ["outdated", "-g", "--json"], extraEnv: env)
+            found += Extras.parseNpm(result.output, needsAdmin: needsAdmin)
+        }
+        if let mas = Extras.locate("mas"), isEnabled(ExtraSource.appStore.rawValue) {
+            let result = await Shell.run(mas, ["outdated"], extraEnv: Extras.environment(for: mas))
+            if result.succeeded { found += Extras.parseMas(result.output) }
+        }
+        extras = found.filter { isEnabled($0.source.rawValue) }
+        notifyExtrasIfNeeded()
+    }
+
+    /// Runs one upgrade without a shell. Returns nil if the tool or name isn't usable.
+    private func runExtra(_ item: ExtraUpdate) async -> CommandResult? {
+        guard let command = Extras.upgradeCommand(for: item) else { return nil }
+        let result = await Shell.run(command.executable, command.arguments,
+                                     extraEnv: Extras.environment(for: command.executable))
+        appendLog("\(item.source.rawValue): \(item.title)", result.output)
+        return result
+    }
+
+    func updateExtra(_ item: ExtraUpdate) async {
+        guard !isBusy else { return }
+        if item.needsTerminal { openExtrasInTerminal([item]); return }
+        busyMessage = "Updating \(item.title)…"
+        notice = nil
+        let result = await runExtra(item)
+        busyMessage = nil
+        if let result, result.succeeded {
+            problem = nil
+            await refresh()
+            notice = "\(item.title) is updated."
+            celebrate()
+        } else {
+            let tail = result?.output.split(separator: "\n").suffix(6).joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            problem = "\(item.title) didn't update.\n" + (tail.isEmpty ? "Check the log below." : tail)
+            await refresh()
+        }
+    }
+
+    /// Updates everything that doesn't need a password in the background,
+    /// then opens Terminal for Homebrew apps (their installers can ask for one).
+    func updateAllExtras() async {
+        guard !isBusy else { return }
+        let background = extras.filter { !$0.needsTerminal }
+        let casks = extras.filter(\.needsTerminal)
+        var failed: [String] = []
+        notice = nil
+        for (index, item) in background.enumerated() {
+            busyMessage = "Updating \(item.title) (\(index + 1)/\(background.count))…"
+            let result = await runExtra(item)
+            if result?.succeeded != true { failed.append(item.title) }
+        }
+        busyMessage = nil
+        if !casks.isEmpty { openExtrasInTerminal(casks) }
+        if failed.isEmpty {
+            problem = nil
+            if !background.isEmpty { notice = "Updated \(background.count) package\(background.count == 1 ? "" : "s")." }
+            if !background.isEmpty { celebrate() }
+        } else {
+            problem = "These didn't update: \(failed.joined(separator: ", ")). See the log below."
+        }
+        await refresh()
+    }
+
+    private func openExtrasInTerminal(_ items: [ExtraUpdate]) {
+        let lines = items.compactMap { item -> String? in
+            guard let command = Extras.upgradeCommand(for: item) else { return nil }
+            let line = ([command.executable] + command.arguments).map { "'\($0)'" }.joined(separator: " ")
+            return item.needsAdmin ? "sudo " + line : line
+        }
+        guard !lines.isEmpty else { problem = "Couldn't build the update command."; return }
+        let body = """
+        #!/bin/bash
+        clear
+        echo "Updating \(items.map(\.name).filter(Extras.isValidName).joined(separator: ", "))…"
+        echo
+        \(lines.joined(separator: "\n"))
+        echo
+        read -r -p "Done. Press Enter to close this window… " _
+        """
+        do {
+            try runInTerminal("extras-update.command", body)
+            clearNoticeOnRefresh = true
+            notice = "Updating in Terminal. When it's done, click me again to refresh."
+        } catch {
+            problem = "Couldn't open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    /// Notifies once per new set of versions, not on every check.
+    private func notifyExtrasIfNeeded() {
+        guard !isSnoozed, !extras.isEmpty else { return }
+        let current = Set(extras.map { "\($0.id)@\($0.latest)" })
+        let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedExtrasKey) ?? [])
+        guard !current.isSubset(of: seen) else { return }
+        UserDefaults.standard.set(Array(current), forKey: Self.notifiedExtrasKey)
+        let names = extras.prefix(4).map(\.title).joined(separator: ", ") + (extras.count > 4 ? "…" : "")
+        notifier?.post(id: "extras",
+                       title: "\(extras.count) app update\(extras.count == 1 ? "" : "s") available",
+                       body: names,
+                       category: NotifyID.extrasCategory)
+    }
+
+    // MARK: - Codex (updates through its own installer)
+
+    private func checkCodex() async {
+        guard isEnabled(Self.codexKey), let path = Codex.locate() else { codex = nil; return }
+        let result = await Shell.run(path, ["--version"])
+        guard result.succeeded, let current = Codex.parseVersion(result.output) else { codex = nil; return }
+        // Ask the network at most once an hour.
+        if codexLatest == nil || Date().timeIntervalSince(codexLatest!.fetched) > 60 * 60,
+           let fresh = await Codex.latestVersion() {
+            codexLatest = (fresh, Date())
+        }
+        codex = CodexStatus(path: path, current: current, latest: codexLatest?.version,
+                            standalone: path == Codex.standalonePath)
+        notifyCodexIfNeeded()
+    }
+
+    /// Official-installer copies update in the background (no password).
+    /// Homebrew/npm copies open Terminal, so the installer can offer to
+    /// replace them; after that, updates are one click.
+    func updateCodex() async {
+        guard let current = codex, !isBusy else { return }
+        guard current.standalone else { openCodexInstaller(); return }
+
+        busyMessage = "Updating Codex…"
+        notice = nil
+        let env = ["CODEX_NON_INTERACTIVE": "1",
+                   "PATH": Codex.home + "/.local/bin:" + Shell.searchPath]
+        let result = await Shell.run("/bin/bash", ["-c", "set -o pipefail; " + Codex.installCommand], extraEnv: env)
+        busyMessage = nil
+        appendLog(Codex.installCommand, result.output)
+        await checkCodex()
+        if result.succeeded, let now = codex, !now.updateAvailable {
+            problem = nil
+            notice = "Codex is updated to \(now.current)."
+            celebrate()
+        } else {
+            let tail = result.output.split(separator: "\n").suffix(6).joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            problem = "Codex didn't update. \(tail)\nYou can also run it in Terminal:\n\(Codex.installCommand)"
+        }
+    }
+
+    private func openCodexInstaller() {
+        let body = """
+        #!/bin/bash
+        clear
+        echo "Updating Codex with the official installer…"
+        echo
+        \(Codex.installCommand)
+        echo
+        read -r -p "Done. Press Enter to close this window… " _
+        """
+        do {
+            try runInTerminal("codex-update.command", body)
+            clearNoticeOnRefresh = true
+            notice = "Codex is updating in Terminal. When it's done, click me again to refresh."
+        } catch {
+            problem = "Couldn't open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    private func notifyCodexIfNeeded() {
+        guard !isSnoozed, let status = codex, status.updateAvailable, let latest = status.latest,
+              UserDefaults.standard.string(forKey: Self.notifiedCodexKey) != latest else { return }
+        UserDefaults.standard.set(latest, forKey: Self.notifiedCodexKey)
+        notifier?.post(id: "codex-\(latest)",
+                       title: "Codex \(latest) is available",
+                       body: "You have \(status.current). Press Update now to install it.",
+                       category: NotifyID.codexCategory)
+    }
+
+    /// Notifies once per new version, not on every check.
+    private func notifyPortsIfNeeded() {
+        guard !isSnoozed, !outdated.isEmpty else { return }
+        let current = Set(outdated.map { "\($0.name)@\($0.latest)" })
+        let seen = Set(UserDefaults.standard.stringArray(forKey: Self.notifiedPortsKey) ?? [])
+        guard !current.isSubset(of: seen) else { return }
+        UserDefaults.standard.set(Array(current), forKey: Self.notifiedPortsKey)
+        let names = outdated.prefix(4).map(\.name).joined(separator: ", ") + (outdated.count > 4 ? "…" : "")
+        notifier?.post(id: "ports",
+                       title: "\(outdated.count) MacPorts update\(outdated.count == 1 ? "" : "s") available",
+                       body: names,
+                       category: NotifyID.portsCategory)
     }
 
     private func countHomebrewFormulae() async {
@@ -191,7 +453,7 @@ final class PortManager: NSObject, ObservableObject {
     /// Syncs and upgrades everything in one password prompt.
     func upgradeAll() async {
         let ok = await admin("Upgrading \(outdated.count) port(s)…",
-                             "\(Self.portPath) -N selfupdate && \(Self.portPath) -N upgrade outdated")
+                             "\(Self.portPath) -N selfupdate && \(Self.portPath) -N upgrade outdated and not \(Codex.portName)")
         if ok { markSynced() }
         await refresh()
         if ok { celebrate() }
@@ -356,9 +618,6 @@ final class PortManager: NSObject, ObservableObject {
             return
         }
         do {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("PortCat", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let command = folder.appendingPathComponent("brew2port.command")
             let body = """
             #!/bin/bash
             clear
@@ -367,9 +626,7 @@ final class PortManager: NSObject, ObservableObject {
             echo
             read -r -p "All done. Press Enter to close this window… " _
             """
-            try body.write(to: command, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
-            NSWorkspace.shared.open(command)
+            try runInTerminal("brew2port.command", body)
             clearNoticeOnRefresh = true
             notice = removeHomebrewCopies
                 ? "Removing old Homebrew copies in Terminal. When it's done, click me again to refresh."
@@ -377,6 +634,16 @@ final class PortManager: NSObject, ObservableObject {
         } catch {
             problem = "Couldn't start brew2port: \(error.localizedDescription)"
         }
+    }
+
+    /// Writes a .command script to a temp folder and opens it in Terminal.
+    private func runInTerminal(_ name: String, _ body: String) throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("PortCat", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let command = folder.appendingPathComponent(name)
+        try body.write(to: command, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
+        NSWorkspace.shared.open(command)
     }
 
     // MARK: - Misc
