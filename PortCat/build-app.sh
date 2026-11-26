@@ -4,24 +4,66 @@
 #   ./build-app.sh             build for this Mac
 #   ./build-app.sh --install   build and copy to /Applications
 #   ./build-app.sh --universal build for Intel + Apple Silicon (needs full Xcode)
+#
+# If SwiftPM is broken on your Mac, the script falls back to compiling with swiftc.
+# Force that with:  PORTCAT_USE_SWIFTC=1 ./build-app.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 BUNDLE_ID="io.github.brew2port.portcat"
 INSTALL=0
+UNIVERSAL=0
 ARCH_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --install) INSTALL=1 ;;
-    --universal) ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
+    --universal) UNIVERSAL=1; ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
   esac
 done
 
+# Plain swiftc build, used when SwiftPM itself is broken (for example a damaged
+# Command Line Tools install that fails with "Invalid manifest ... PackageDescription").
+# The app has no dependencies, so compiling the sources directly works the same.
+build_with_swiftc() {
+  case "$(uname -m)" in
+    arm64) target="arm64-apple-macos13.0" ;;
+    *)     target="x86_64-apple-macos13.0" ;;
+  esac
+  mkdir -p build
+  # `|| return 1`: set -e is off inside a function called from `if`, so check by hand.
+  swiftc -O -parse-as-library -target "$target" Sources/PortCat/*.swift -o build/PortCat-swiftc || return 1
+  BIN="build/PortCat-swiftc"
+}
+
 echo "==> Building PortCat (release)…"
-swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"}
-BIN="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --show-bin-path)/PortCat"
+if [ "${PORTCAT_USE_SWIFTC:-0}" = "1" ]; then
+  if [ "$UNIVERSAL" = 1 ]; then
+    echo "✘ --universal can't be combined with PORTCAT_USE_SWIFTC=1 (it needs SwiftPM)."
+    exit 1
+  fi
+  echo "    (PORTCAT_USE_SWIFTC=1, compiling with swiftc directly)"
+  build_with_swiftc || exit 1
+elif swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"}; then
+  BIN="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --show-bin-path)/PortCat"
+else
+  echo ""
+  echo "! swift build failed. If the error above mentions \"Invalid manifest\" or"
+  echo "  \"PackageDescription\", your Command Line Tools install is probably damaged."
+  echo "  Trying a direct swiftc build instead…"
+  if [ "$UNIVERSAL" = 1 ]; then
+    echo "✘ --universal needs a working SwiftPM. Reinstall the Command Line Tools:"
+    echo "    sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
+    exit 1
+  fi
+  if ! build_with_swiftc; then
+    echo "✘ The direct build failed too. Reinstall the Command Line Tools, then run this again:"
+    echo "    sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
+    exit 1
+  fi
+  echo "✔ Built with swiftc (SwiftPM was not usable on this Mac)"
+fi
 
 APP="build/PortCat.app"
 rm -rf "$APP"

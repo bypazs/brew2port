@@ -19,3 +19,11 @@ jobs:
       - name: Test PortCat parsers
         working-directory: PortCat
         run: swift test
+      - name: Build the app bundle with the swiftc fallback
+        working-directory: PortCat
+        run: PORTCAT_USE_SWIFTC=1 ./build-app.sh
+      - name: Check the fallback app starts
+        working-directory: PortCat
+        run: |
+          test -x build/PortCat.app/Contents/MacOS/PortCat
+          codesign --verify --deep build/PortCat.app
