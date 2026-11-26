@@ -87,7 +87,7 @@ MacPorts, like Homebrew, has no built-in vulnerability scanner. Security fixes a
 
 ## PortCat: a menu bar cat for MacPorts
 
-After migrating, [PortCat](PortCat/README.md) keeps an eye on your ports from the menu bar. It sleeps when everything is current, waves with a count when updates are waiting, and lets you upgrade in a click. It can also do the whole move for you: install MacPorts, move your Homebrew formulae, remove the old copies and clean up leftovers, all from buttons.
+After migrating, [PortCat](PortCat/README.md) keeps an eye on your ports from the menu bar. It sleeps when everything is current, waves with a count when updates are waiting, and lets you upgrade in a click. It also watches Codex, Homebrew, npm and App Store apps, and sends a notification with an update button when something new is out. It can also do the whole move for you: install MacPorts, move your Homebrew formulae, remove the old copies and clean up leftovers, all from buttons.
 
 ![PortCat](PortCat/portcat-preview.gif)
 

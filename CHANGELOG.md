@@ -1,5 +1,9 @@
 # Changelog
 
+## PortCat 0.4.2
+- A real app icon: the sitting cat on a dark rounded square, instead of the blank placeholder. `PortCat/Icon/make-icon.py` draws it from the same pixel art as the menu bar cat and writes `PortCat.icns`; `build-app.sh` bundles it. The same icon shows on PortCat's notifications.
+- README: documented the `swiftc` build fallback, the icon, the skipped MacPorts `codex` port, and the other update sources.
+
 ## PortCat 0.4.1
 - `build-app.sh` falls back to compiling with `swiftc` directly when `swift build` fails, for Macs whose Command Line Tools are damaged ("Invalid manifest ... PackageDescription" errors, see issue #1). `PORTCAT_USE_SWIFTC=1` forces it. `--universal` still needs a working SwiftPM.
 

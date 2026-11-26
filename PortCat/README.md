@@ -1,6 +1,6 @@
 # PortCat 🐾
 
-A tiny menu bar cat that looks after your MacPorts. Part of [brew2port](../README.md).
+A tiny menu bar cat that looks after your MacPorts, and tells you when other tools on your Mac (Codex, Homebrew, npm, App Store apps) have updates too. Part of [brew2port](../README.md).
 
 ![PortCat moods](portcat-preview.gif)
 
@@ -14,7 +14,7 @@ The cat's pose tells you how your ports are doing at a glance:
 | Ears down | MacPorts is missing or something needs a look |
 | Jumping with sparkles | An upgrade just finished |
 
-Click the cat to see what's outdated and upgrade one port or all of them, list what you've installed, run `port diagnose`, clean up old versions (`port reclaim`), and turn on Open at Login.
+Click the cat to see what's outdated and upgrade one port or all of them (the MacPorts `codex` port is skipped: it only supports Apple Silicon, so Codex is updated with its official installer instead), list what you've installed, run `port diagnose`, clean up old versions (`port reclaim`), and turn on Open at Login.
 
 It also helps you get off Homebrew:
 
@@ -45,6 +45,10 @@ cd PortCat
 ```
 
 `./build-app.sh` alone builds to `build/PortCat.app` without installing. `--universal` builds for Intel and Apple Silicon (needs full Xcode).
+
+If `swift build` fails with `Invalid manifest` / `PackageDescription` errors, your Command Line Tools install is probably damaged. The script then compiles with `swiftc` directly and carries on, so you usually don't need to do anything. You can force that path with `PORTCAT_USE_SWIFTC=1 ./build-app.sh`. If both fail, reinstall the tools: `sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install`.
+
+The app icon is the sitting cat from the menu bar. `Icon/make-icon.py` draws it (needs `pip install pillow`) and writes `Icon/PortCat.icns`; run it again if you change the cat's art or colors. If the Dock or Finder keeps showing an old icon after you reinstall, run `killall Dock Finder` to clear the icon cache.
 
 The app is ad-hoc signed, not notarized. Because you build it yourself it opens normally; if you share a pre-built copy, others will need to right-click → Open the first time.
 

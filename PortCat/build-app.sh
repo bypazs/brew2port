@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="0.4.1"
+VERSION="0.4.2"
 BUNDLE_ID="io.github.brew2port.portcat"
 INSTALL=0
 UNIVERSAL=0
@@ -70,6 +70,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/PortCat"
 
+# App icon (made by Icon/make-icon.py). Without it macOS shows a blank placeholder.
+if [ -f Icon/PortCat.icns ]; then
+  cp Icon/PortCat.icns "$APP/Contents/Resources/PortCat.icns"
+else
+  echo "! Icon/PortCat.icns not found; the app will have the default icon"
+fi
+
 # Bundle brew2port.sh so the app's "Move my Homebrew packages…" button works.
 if [ -f ../brew2port.sh ]; then
   cp ../brew2port.sh "$APP/Contents/Resources/brew2port.sh"
@@ -87,6 +94,7 @@ cat >"$APP/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>PortCat</string>
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleExecutable</key><string>PortCat</string>
+  <key>CFBundleIconFile</key><string>PortCat</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
