@@ -39,10 +39,35 @@ enum Extras {
 
     // MARK: - Locating tools
 
-    static func locate(_ tool: String) -> String? {
-        ["/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"]
-            .map { "\($0)/\(tool)" }
+    /// Looks where tools usually live. Tools you manage yourself (nvm, Volta) come first,
+    /// since those are the ones your Terminal would pick.
+    static func locate(_ tool: String, home: String = NSHomeDirectory()) -> String? {
+        var dirs: [String] = []
+        if tool == "npm" {
+            if let nvm = nvmBin(home: home) { dirs.append(nvm) }
+            dirs.append(home + "/.volta/bin")
+        }
+        dirs += ["/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin"]
+        return dirs.map { "\($0)/\(tool)" }
             .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// The bin folder of the Node that nvm uses by default (its `alias/default`, e.g. "v26.13.1"
+    /// or "26"), or else the newest installed one. Nil if nvm isn't there.
+    static func nvmBin(home: String) -> String? {
+        let fm = FileManager.default
+        let root = home + "/.nvm"
+        let versions = root + "/versions/node"
+        let installed = ((try? fm.contentsOfDirectory(atPath: versions)) ?? [])
+            .filter { $0.hasPrefix("v") && fm.isExecutableFile(atPath: "\(versions)/\($0)/bin/npm") }
+        func newest(_ list: [String]) -> String? {
+            list.max { Codex.isNewer(String($1.dropFirst()), than: String($0.dropFirst())) }
+        }
+        let alias = ((try? String(contentsOfFile: root + "/alias/default", encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wanted = alias.hasPrefix("v") ? alias : "v" + alias
+        let preferred = alias.isEmpty ? [] : installed.filter { $0 == wanted || $0.hasPrefix(wanted + ".") }
+        return (newest(preferred) ?? newest(installed)).map { "\(versions)/\($0)/bin" }
     }
 
     /// npm and its scripts start `node` through env, so node's folder must be on PATH.

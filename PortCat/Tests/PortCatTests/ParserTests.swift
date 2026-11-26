@@ -55,4 +55,24 @@ final class ParserTests: XCTestCase {
         XCTAssertFalse(Extras.isValidName("a b"))
         XCTAssertFalse(Extras.isValidName("x;rm"))
     }
+
+    func testNvmPicksDefaultThenNewest() throws {
+        let home = NSTemporaryDirectory() + "portcat-nvm-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        for version in ["v20.1.0", "v26.13.1", "v9.9.9"] {
+            let bin = "\(home)/.nvm/versions/node/\(version)/bin"
+            try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: bin + "/npm", contents: Data("#!/bin/sh\n".utf8),
+                                           attributes: [.posixPermissions: 0o755])
+        }
+        // No alias: the newest wins (26 is newer than 9, even though "v9" sorts after "v26" as text).
+        XCTAssertEqual(Extras.nvmBin(home: home), home + "/.nvm/versions/node/v26.13.1/bin")
+        XCTAssertEqual(Extras.locate("npm", home: home), home + "/.nvm/versions/node/v26.13.1/bin/npm")
+        // An alias like "20" picks the matching installed version.
+        try FileManager.default.createDirectory(atPath: home + "/.nvm/alias", withIntermediateDirectories: true)
+        try "20\n".write(toFile: home + "/.nvm/alias/default", atomically: true, encoding: .utf8)
+        XCTAssertEqual(Extras.nvmBin(home: home), home + "/.nvm/versions/node/v20.1.0/bin")
+        // No nvm at all.
+        XCTAssertNil(Extras.nvmBin(home: home + "/missing"))
+    }
 }

@@ -5,6 +5,7 @@
 - macOS notifications with a button: "Update now" for Codex, "Upgrade all" for MacPorts ports. Each new version is announced once, not on every check.
 - Other apps: PortCat also lists outdated **Homebrew** formulae and apps, **npm** global packages and **App Store** apps (needs `mas`), each with an Update button and an "Update all". Homebrew apps update in Terminal because their installers can ask for a password; the rest update in the background.
 - The cat waves and the badge counts all of these.
+- npm is also found when it comes from nvm (the default Node in `~/.nvm`, else the newest) or Volta.
 - A gear menu in the popover: choose which sources to check (Homebrew tools, Homebrew apps, npm, App Store, Codex; only the ones installed on this Mac are listed) and pause notifications for a day or a week. Notifications also have a "Remind me tomorrow" button.
 
 ## brew2port 0.5.1
