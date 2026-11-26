@@ -8,10 +8,10 @@ The cat's pose tells you how your ports are doing at a glance:
 
 | Cat | Meaning |
 |---|---|
-| Curled up, zzz | Everything is up to date |
-| Running | Checking, syncing or upgrading |
-| Sitting, waving, with a number | That many ports are outdated |
-| Ears down | MacPorts is missing or something needs a look |
+| Curled up, breathing softly with a floating z | Everything is up to date |
+| Bouncing through a run cycle | Checking, syncing or upgrading |
+| Waving and blinking, with a number | That many ports are outdated |
+| Ears down, with a little tear | MacPorts is missing or something needs a look |
 | Jumping with sparkles | An upgrade just finished |
 
 Click the cat to see what's outdated and upgrade one port or all of them (the MacPorts `codex` port is skipped: it only supports Apple Silicon, so Codex is updated with its official installer instead), list what you've installed, run `port diagnose`, clean up old versions (`port reclaim`), and turn on Open at Login.
@@ -48,13 +48,13 @@ cd PortCat
 
 If `swift build` fails with `Invalid manifest` / `PackageDescription` errors, your Command Line Tools install is probably damaged. The script then compiles with `swiftc` directly and carries on, so you usually don't need to do anything. You can force that path with `PORTCAT_USE_SWIFTC=1 ./build-app.sh`. If both fail, reinstall the tools: `sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install`.
 
-The app icon is the sitting cat from the menu bar. `Icon/make-icon.py` draws it (needs `pip install pillow`) and writes `Icon/PortCat.icns`; run it again if you change the cat's art or colors. If the Dock or Finder keeps showing an old icon after you reinstall, run `killall Dock Finder` to clear the icon cache.
+The app icon is the waving tabby on a teal background. `Icon/make-icon.py` draws it (needs `pip install pillow`) and writes `Icon/PortCat.icns`; run it again if you change the cat's art or colors. If the Dock or Finder keeps showing an old icon after you reinstall, run `killall Dock Finder` to clear the icon cache.
 
 The app is ad-hoc signed, not notarized. Because you build it yourself it opens normally; if you share a pre-built copy, others will need to right-click → Open the first time.
 
 ## Notes
 
-- The cat follows light and dark mode automatically, in the menu bar and in the popover:
+- The menu bar cat follows the system tint, and the popover shows the tabby in color. Both show a still pose if Reduce Motion is enabled:
 
   ![PortCat in dark mode](portcat-preview-dark.gif)
 

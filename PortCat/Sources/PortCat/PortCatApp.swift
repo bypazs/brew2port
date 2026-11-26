@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.notifier = notifier
 
         manager.onChange = { [weak self] in self?.stateChanged() }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(motionPreferenceChanged(_:)),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         stateChanged()
         manager.start()
     }
@@ -69,9 +72,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mood = manager.mood
         guard mood != currentMood else { return }
         currentMood = mood
+        restartAnimation(for: mood)
+    }
+
+    @objc private func motionPreferenceChanged(_ notification: Notification) {
+        if let currentMood { restartAnimation(for: currentMood) }
+    }
+
+    private func restartAnimation(for mood: CatMood) {
         frameIndex = 0
         animationTimer?.invalidate()
+        animationTimer = nil
         showFrame()
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let timer = Timer(timeInterval: 1.0 / mood.fps, target: self,
                           selector: #selector(nextFrame), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)   // keeps animating while menus are open
