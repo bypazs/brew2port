@@ -1,5 +1,8 @@
 # Changelog
 
+## PortCat 0.4.1
+- `build-app.sh` falls back to compiling with `swiftc` directly when `swift build` fails, for Macs whose Command Line Tools are damaged ("Invalid manifest ... PackageDescription" errors, see issue #1). `PORTCAT_USE_SWIFTC=1` forces it. `--universal` still needs a working SwiftPM.
+
 ## PortCat 0.4.0
 - Codex updates: PortCat checks the installed Codex CLI against the latest release (OpenAI's release channel, then GitHub) and shows an **Update** button. Copies from the official installer (`~/.local/bin/codex`) update in the background with no password. Homebrew/npm copies open Terminal so the installer can offer to replace them.
 - macOS notifications with a button: "Update now" for Codex, "Upgrade all" for MacPorts ports. Each new version is announced once, not on every check.
